@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAP Integration Event Dashboard</title>
+    <!-- Link CSS file -->
+    <link rel="stylesheet" th:href="@{/css/style.css}" />
+    <!-- Chart.js library for charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<!-- ===== NAVIGATION BAR ===== -->
+<nav class="navbar">
+    <div class="navbar-content">
+        <h1>📊 SAP Integration Event Dashboard</h1>
+        <div class="navbar-actions">
+            <!-- Button to toggle dark mode -->
+            <button onclick="toggleDarkMode()" class="btn-icon">🌙</button>
+            <!-- Current time -->
+            <span class="time" id="currentTime"></span>
+        </div>
+    </div>
+</nav>
+
+<!-- ===== MAIN CONTAINER ===== -->
+<div class="container">
+
+    <!-- ===== STATISTICS CARDS ===== -->
+    <!-- These show: Total Events, Success Rate, Failed, Pending -->
+    <div class="stats-grid">
+
+        <!-- Card 1: Total Events -->
+        <div class="stat-card">
+            <div class="stat-icon">📈</div>
+            <div class="stat-content">
+                <h3>Total Events</h3>
+                <!-- Get value from controller: stats.totalEvents -->
+                <p class="stat-number" th:text="${stats.totalEvents}">0</p>
+            </div>
+        </div>
+
+        <!-- Card 2: Success Rate -->
+        <div class="stat-card success">
+            <div class="stat-icon">✓</div>
+            <div class="stat-content">
+                <h3>Success Rate</h3>
+                <!-- Add % sign to the success rate -->
+                <p class="stat-number" th:text="${stats.successRate} + '%'">0%</p>
+            </div>
+        </div>
+
+        <!-- Card 3: Failed -->
+        <div class="stat-card warning">
+            <div class="stat-icon">⚠️</div>
+            <div class="stat-content">
+                <h3>Failed</h3>
+                <p class="stat-number" th:text="${stats.failedCount}">0</p>
+            </div>
+        </div>
+
+        <!-- Card 4: Pending -->
+        <div class="stat-card pending">
+            <div class="stat-icon">⏳</div>
+            <div class="stat-content">
+                <h3>Pending</h3>
+                <p class="stat-number" th:text="${stats.pendingCount}">0</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== SEARCH AND FILTER SECTION ===== -->
+    <div class="search-section">
+
+        <!-- Search form -->
+        <form method="post" th:action="@{/search}" class="search-form">
+            <input type="text" name="orderId" placeholder="🔍 Search by Order ID..." class="search-input" />
+            <button type="submit" class="btn btn-primary">Search</button>
+        </form>
+
+        <!-- Filter dropdown -->
+        <form method="post" th:action="@{/filter}" class="filter-form">
+            <select name="status" class="filter-select" onchange="this.form.submit()">
+                <option value="">All Status</option>
+                <option value="SUCCESS">✓ Success</option>
+                <option value="FAILED">✗ Failed</option>
+                <option value="PENDING">⏳ Pending</option>
+            </select>
+        </form>
+
+        <!-- Refresh button -->
+        <form method="post" th:action="@{/}" class="refresh-form">
+            <button type="button" onclick="location.reload()" class="btn btn-secondary">🔄 Refresh</button>
+        </form>
+    </div>
+
+    <!-- ===== EVENTS TABLE ===== -->
+    <div class="table-section">
+        <h2>📋 Recent Events</h2>
+        <div class="table-wrapper">
+            <table class="events-table">
+                <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Order ID</th>
+                    <th>Integration</th>
+                    <th>Status</th>
+                    <th>Message</th>
+                    <th>Time</th>
+                    <th>Action</th>
+                </tr>
+                </thead>
+                <tbody>
+                <!-- Loop through all events -->
+                <!-- iterStat gives us: count (1,2,3...), index (0,1,2...), first, last -->
+                <tr th:each="event, iterStat : ${events}"
+                    th:class="${event.status == 'SUCCESS' ? 'row-success' : event.status == 'FAILED' ? 'row-failed' : 'row-pending'}">
+
+                    <!-- Row number (1, 2, 3...) -->
+                    <td th:text="${iterStat.count}">1</td>
+
+                    <!-- Order ID -->
+                    <td th:text="${event.orderId}">PO-12345</td>
+
+                    <!-- Integration name -->
+                    <td th:text="${event.integrationName}">Order-to-SAP</td>
+
+                    <!-- Status badge (colored) -->
+                    <td>
+                                <span class="badge"
+                                      th:class="${event.status == 'SUCCESS' ? 'badge-success' : event.status == 'FAILED' ? 'badge-danger' : 'badge-warning'}"
+                                      th:text="${event.status}">SUCCESS</span>
+                    </td>
+
+                    <!-- Message -->
+                    <td th:text="${event.message}">Order placed successfully</td>
+
+                    <!-- Time (formatted as "2 mins ago") -->
+                    <td th:text="${event.getTimeAgo()}">2 mins ago</td>
+
+                    <!-- Action button (Retry for failed, View for others) -->
+                    <td>
+                        <!-- If status is FAILED, show Retry button -->
+                        <button th:if="${event.status == 'FAILED'}"
+                                th:onclick="'location.href=&quot;/reprocess/' + ${event.id} + '&quot;'"
+                                class="btn btn-sm btn-warning">🔄 Retry</button>
+
+                        <!-- Otherwise show disabled View button -->
+                        <button th:unless="${event.status == 'FAILED'}"
+                                class="btn btn-sm btn-secondary" disabled>View</button>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ===== CHART SECTION ===== -->
+    <div class="chart-section">
+        <h2>📊 Event Statistics</h2>
+        <!-- Canvas for Chart.js -->
+        <canvas id="statsChart"></canvas>
+    </div>
+
+</div>
+
+<!-- ===== FOOTER ===== -->
+<footer class="footer">
+    <p>&copy; 2025 SAP Integration Dashboard | Powered by Spring Boot + Kafka + Thymeleaf</p>
+</footer>
+
+<!-- ===== JAVASCRIPT ===== -->
+<script th:src="@{/js/dashboard.js}"></script>
+<script>
+    // Update current time every second
+    function updateTime() {
+        const now = new Date();
+        document.getElementById('currentTime').innerText = now.toLocaleTimeString();
+    }
+    setInterval(updateTime, 1000);
+    updateTime();
+
+    // Create Chart.js doughnut chart
+    const ctx = document.getElementById('statsChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Success', 'Failed', 'Pending'],
+            datasets: [{
+                // Get data from Thymeleaf variables
+                data: [
+                    [[${stats.successCount}]],
+                    [[${stats.failedCount}]],
+                    [[${stats.pendingCount}]]
+                ],
+                backgroundColor: ['#28a745', '#dc3545', '#ffc107']
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom' }
+            }
+        }
+    });
+
+    // Dark mode toggle
+    function toggleDarkMode() {
+        document.body.classList.toggle('dark-mode');
+        localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
+    }
+
+    // Load dark mode preference from browser storage
+    if (localStorage.getItem('darkMode') === 'true') {
+        document.body.classList.add('dark-mode');
+    }
+</script>
+
+</body>
+</html>
