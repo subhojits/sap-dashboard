@@ -6,24 +6,41 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface IntegrationEventRepository extends JpaRepository<IntegrationEvent, Long> {
 
-    List<IntegrationEvent> findByStatusOrderByTimestampDesc(String status);
+    // --- EXISTING QUERIES (FIXED) ---
+    @Query("SELECT e FROM IntegrationEvent e WHERE e.status = 'FAILED' AND e.payload IS NOT NULL ORDER BY e.createdAt DESC")
+    List<IntegrationEvent> findFailedEventsWithPayload();
 
-    List<IntegrationEvent> findByOrderIdContainingIgnoreCaseOrderByTimestampDesc(String orderId);
+    // --- NEW METHODS ADDED (FROM ERROR LIST) ---
 
-    List<IntegrationEvent> findTop50ByOrderByTimestampDesc();
+    // Fixes: cannot find symbol method findByStatus(java.lang.String)
+    List<IntegrationEvent> findByStatus(String status);
 
-    Long countByStatus(String status);
+    // Fixes: cannot find symbol method findByOrderId(java.lang.String)
+    List<IntegrationEvent> findByOrderId(String orderId);
 
-    List<IntegrationEvent> findByIntegrationNameOrderByTimestampDesc(String integrationName);
+    // Fixes: cannot find symbol method findFailedEventById(java.lang.Long)
+    @Query("SELECT e FROM IntegrationEvent e WHERE e.id = :id AND e.status = 'FAILED'")
+    Optional<IntegrationEvent> findFailedEventById(@Param("id") Long id);
 
-    //Long count();
+    // --- ADDITIONAL USEFUL QUERIES ---
+    @Query("SELECT e FROM IntegrationEvent e WHERE e.status = 'SUCCESS' ORDER BY e.createdAt DESC")
+    List<IntegrationEvent> findSuccessfulEvents();
 
-    @Query("SELECT e FROM IntegrationEvent e WHERE e.timestamp BETWEEN :startTime AND :endTime ORDER BY e.timestamp DESC")
-    List<IntegrationEvent> findEventsBetween(@Param("startTime") LocalDateTime startTime, @Param("endTime") LocalDateTime endTime);
+    @Query("SELECT e FROM IntegrationEvent e WHERE e.status = 'PENDING' ORDER BY e.createdAt DESC")
+    List<IntegrationEvent> findPendingEvents();
+
+    @Query("SELECT e FROM IntegrationEvent e WHERE e.retryCount > 0 ORDER BY e.createdAt DESC")
+    List<IntegrationEvent> findRetriedEvents();
+
+    @Query("SELECT COUNT(e) FROM IntegrationEvent e WHERE e.status = 'FAILED'")
+    long countFailedEvents();
+
+    @Query("SELECT COUNT(e) FROM IntegrationEvent e WHERE e.status = 'SUCCESS'")
+    long countSuccessfulEvents();
 }

@@ -1,17 +1,12 @@
 package com.example.sapdashboard.model;
 
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-
 import java.time.LocalDateTime;
+import java.time.Duration;
 
 @Entity
 @Table(name = "integration_events")
@@ -24,47 +19,98 @@ public class IntegrationEvent {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(name = "order_id", nullable = false)
     private String orderId;
 
-    @Column(nullable = false)
+    @Column(name = "status", nullable = false)
     private String status;
 
-    @Column(nullable = false)
-    private LocalDateTime timestamp;
-
-    @Column(length = 500)
+    @Column(name = "message", columnDefinition = "TEXT")
     private String message;
 
-    @Column(length = 1000)
+    @Column(name = "payload", columnDefinition = "LONGTEXT")
+    private String payload;
+
+    @Column(name = "original_payload", columnDefinition = "LONGTEXT")
+    private String originalPayload;
+
+    @Column(name = "payload_format")
+    private String payloadFormat;
+
+    @Column(name = "retry_count")
+    private int retryCount = 0;
+
+    @Column(name = "retry_history", columnDefinition = "TEXT")
+    private String retryHistory;
+
+    @Column(name = "error_details", columnDefinition = "TEXT")
     private String errorDetails;
 
-    @Column(nullable = false)
+    // 🚨 NEW FIELD ADDED HERE 🚨
+    @Column(name = "integration_name")
     private String integrationName;
+    // 🚨 END NEW FIELD 🚨
 
-    public IntegrationEvent(String orderId, String status, String message, String integrationName) {
-        this.orderId = orderId;
-        this.status = status;
-        this.message = message;
-        this.integrationName = integrationName;
-        this.timestamp = LocalDateTime.now();
-        this.errorDetails = "";
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+
+    // --- METHODS ---
+
+    public LocalDateTime getTimestamp() {
+        return createdAt;
     }
 
-    public boolean isPassed() {
-        return "SUCCESS".equalsIgnoreCase(this.status);
+    public void setTimestamp(LocalDateTime timestamp) {
+        this.createdAt = timestamp;
     }
 
+    public boolean canRetry() {
+        return retryCount < 3; // Max 3 retries
+    }
+
+    public void incrementRetry() {
+        this.retryCount++;
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    /**
+     * Calculate time elapsed since event creation (e.g., "5 minutes ago")
+     */
     public String getTimeAgo() {
-        LocalDateTime now = LocalDateTime.now();
-        long seconds = java.time.temporal.ChronoUnit.SECONDS.between(this.timestamp, now);
+        if (this.createdAt == null) {
+            return "Unknown";
+        }
 
-        if (seconds < 60) return seconds + "s ago";
-        long minutes = seconds / 60;
-        if (minutes < 60) return minutes + "m ago";
-        long hours = minutes / 60;
-        if (hours < 24) return hours + "h ago";
-        long days = hours / 24;
-        return days + "d ago";
+        LocalDateTime now = LocalDateTime.now();
+        Duration duration = Duration.between(this.createdAt, now);
+
+        long seconds = duration.getSeconds();
+
+        if (seconds < 60) {
+            return seconds + "s ago";
+        } else if (seconds < 3600) {
+            long minutes = seconds / 60;
+            return minutes + "m ago";
+        } else if (seconds < 86400) {
+            long hours = seconds / 3600;
+            return hours + "h ago";
+        } else {
+            long days = seconds / 86400;
+            return days + "d ago";
+        }
+    }
+
+    @PrePersist
+    protected void onCreate() {
+        if (createdAt == null) createdAt = LocalDateTime.now();
+        if (updatedAt == null) updatedAt = LocalDateTime.now();
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = LocalDateTime.now();
     }
 }

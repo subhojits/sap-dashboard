@@ -1,130 +1,227 @@
 package com.example.sapdashboard.controller;
 
-
-import com.example.sapdashboard.kafka.KafkaProducer;
+import com.example.sapdashboard.dto.RetryEventRequest;
 import com.example.sapdashboard.model.IntegrationEvent;
 import com.example.sapdashboard.service.EventService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
-// @Controller tells Spring this handles web requests and returns HTML
 @Controller
-// Inject dependencies automatically
 @RequiredArgsConstructor
-// Enable logging
 @Slf4j
 public class DashboardController {
 
-    // Inject the EventService
     private final EventService eventService;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    // Inject the KafkaProducer
-    private final KafkaProducer kafkaProducer;
+    // ===== WEB PAGES (Thymeleaf) =====
 
-    // ===== ROUTE 1: SHOW DASHBOARD =====
-    // GET http://localhost:8080/
+    /**
+     * GET / - Show Dashboard
+     * Main dashboard view with all events and statistics
+     */
     @GetMapping("/")
     public String dashboard(Model model) {
-        // Get recent events from database
+        log.info("Loading dashboard");
+
+        // Get recent events
         List<IntegrationEvent> events = eventService.getRecentEvents();
 
-        // Get statistics (total, success rate, etc.)
+        // Get statistics
         Map<String, Object> stats = eventService.getDashboardStats();
 
         // Pass data to Thymeleaf template
-        // In HTML, you'll access these as ${events} and ${stats}
         model.addAttribute("events", events);
         model.addAttribute("stats", stats);
 
-        log.info("Dashboard loaded with {} events", events.size());
-
-        // Return the HTML file name (from src/main/resources/templates/)
         return "dashboard";
     }
 
-    // ===== ROUTE 2: REST API - RECEIVE NEW EVENT =====
-    // POST http://localhost:8080/api/events
-    // Body: {"orderId":"PO-123", "status":"SUCCESS", ...}
-    @PostMapping("/api/events")
-    public ResponseEntity<?> receiveEvent(@RequestBody IntegrationEvent event) {
-        log.info("Received event via REST: {}", event.getOrderId());
+    /**
+     * GET /search - Search events by Order ID
+     * Used for search functionality
+     */
+    @GetMapping("/search")
+    public String search(@RequestParam(value = "orderId", required = false) String orderId, Model model) {
+        log.info("Searching events with orderId: {}", orderId);
 
-        // Send the event to Kafka
-        kafkaProducer.sendEvent(event);
+        List<IntegrationEvent> events = eventService.searchByOrderId(orderId);
+        Map<String, Object> stats = eventService.getDashboardStats();
 
-        // Return success response
-        return ResponseEntity.ok(Map.of(
-                "status", "success",
-                "message", "Event received and published to Kafka",
-                "orderId", event.getOrderId()
-        ));
-    }
-
-    // ===== ROUTE 3: SEARCH BY ORDER ID =====
-    // POST http://localhost:8080/search?orderId=PO-123
-    @PostMapping("/search")
-    public String search(@RequestParam String orderId, Model model) {
-        // Search database for this order ID
-        List<IntegrationEvent> results = eventService.searchByOrderId(orderId);
-
-        // Add to model
-        model.addAttribute("events", results);
-        model.addAttribute("stats", eventService.getDashboardStats());
+        model.addAttribute("events", events);
+        model.addAttribute("stats", stats);
         model.addAttribute("searchQuery", orderId);
 
-        log.info("Search performed for: {}", orderId);
-
-        // Return same dashboard template but with filtered data
         return "dashboard";
     }
 
-    // ===== ROUTE 4: FILTER BY STATUS =====
-    // POST http://localhost:8080/filter?status=FAILED
-    @PostMapping("/filter")
-    public String filter(@RequestParam String status, Model model) {
-        // Filter database by status
-        List<IntegrationEvent> results = eventService.filterByStatus(status);
+    /**
+     * GET /filter - Filter events by status
+     * Used for status filtering
+     */
+    @GetMapping("/filter")
+    public String filter(@RequestParam(value = "status", required = false) String status, Model model) {
+        log.info("Filtering events with status: {}", status);
 
-        // Add to model
-        model.addAttribute("events", results);
-        model.addAttribute("stats", eventService.getDashboardStats());
+        List<IntegrationEvent> events = eventService.filterByStatus(status);
+        Map<String, Object> stats = eventService.getDashboardStats();
+
+        model.addAttribute("events", events);
+        model.addAttribute("stats", stats);
         model.addAttribute("filterStatus", status);
 
-        log.info("Filter applied: {}", status);
-
-        // Return same dashboard template but with filtered data
         return "dashboard";
     }
 
-    // ===== ROUTE 5: REPROCESS FAILED EVENT =====
-    // POST http://localhost:8080/reprocess/1
-    @PostMapping("/reprocess/{id}")
-    public String reprocessEvent(@PathVariable Long id) {
-        // Mark event as PENDING so it can be retried
-        eventService.reprocessEvent(id);
+    // ===== REST API ENDPOINTS =====
 
-        log.info("Event {} marked for reprocessing", id);
+    /**
+     * POST /api/events - Create/Save new event
+     * Receive event from external system and save to database
+     */
+    @PostMapping("/api/events")
+    public ResponseEntity<IntegrationEvent> createEvent(@RequestBody IntegrationEvent event) {
+        log.info("Creating new event for order: {}", event.getOrderId());
 
-        // Redirect back to dashboard
-        return "redirect:/";
+        IntegrationEvent savedEvent = eventService.saveEvent(event);
+
+        // Also publish to Kafka topic
+        try {
+            kafkaTemplate.send("sap-integration-events", event.getOrderId(), savedEvent);
+        } catch (Exception e) {
+            log.error("Error publishing to Kafka", e);
+        }
+
+        return ResponseEntity.ok(savedEvent);
     }
 
-    // ===== ROUTE 6: HEALTH CHECK =====
-    // GET http://localhost:8080/health
+    /**
+     * GET /api/events - Get all events (REST API)
+     */
+    @GetMapping("/api/events")
+    public ResponseEntity<List<IntegrationEvent>> getAllEvents() {
+        List<IntegrationEvent> events = eventService.getAllEvents();
+        return ResponseEntity.ok(events);
+    }
+
+    /**
+     * GET /api/events/{id} - Get event details by ID
+     * Used by modal to fetch event details including payload
+     */
+    @GetMapping("/api/events/{id}")
+    public ResponseEntity<IntegrationEvent> getEventDetails(@PathVariable Long id) {
+        log.info("Fetching event details for ID: {}", id);
+
+        IntegrationEvent event = eventService.getEventDetails(id);
+        return ResponseEntity.ok(event);
+    }
+
+    /**
+     * GET /api/events/status/{status} - Get events by status
+     */
+    @GetMapping("/api/events/status/{status}")
+    public ResponseEntity<List<IntegrationEvent>> getEventsByStatus(@PathVariable String status) {
+        List<IntegrationEvent> events = eventService.getEventsByStatus(status);
+        return ResponseEntity.ok(events);
+    }
+
+    /**
+     * GET /api/events/search/{orderId} - Search events by Order ID
+     */
+    @GetMapping("/api/events/search/{orderId}")
+    public ResponseEntity<List<IntegrationEvent>> searchByOrderId(@PathVariable String orderId) {
+        List<IntegrationEvent> events = eventService.searchByOrderId(orderId);
+        return ResponseEntity.ok(events);
+    }
+
+    /**
+     * GET /api/stats - Get dashboard statistics
+     */
+    @GetMapping("/api/stats")
+    public ResponseEntity<Map<String, Object>> getStats() {
+        Map<String, Object> stats = eventService.getDashboardStats();
+        return ResponseEntity.ok(stats);
+    }
+
+    /**
+     * POST /api/events/{id}/reprocess - Quick reprocess (changes status to PENDING)
+     * Used by simple retry button in dashboard
+     */
+    @PostMapping("/api/events/{id}/reprocess")
+    public ResponseEntity<Map<String, String>> reprocessEvent(@PathVariable Long id) {
+        log.info("Reprocessing event: {}", id);
+
+        try {
+            eventService.reprocessEvent(id);
+
+            return ResponseEntity.ok(Map.of(
+                    "status", "success",
+                    "message", "Event reprocessed successfully"
+            ));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "error",
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * POST /api/events/{id}/retry - Retry with updated payload (Modal)
+     * Used by payload editor modal when user submits edited payload
+     */
+    @PostMapping("/api/events/{id}/retry")
+    public ResponseEntity<Map<String, String>> retryFailedEvent(
+            @PathVariable Long id,
+            @RequestBody RetryEventRequest request) {
+
+        log.info("Retrying event: {} with updated payload", id);
+
+        try {
+            request.setEventId(id);
+            eventService.retryFailedEvent(request);
+
+            return ResponseEntity.ok(Map.of(
+                    "status", "success",
+                    "message", "Event sent to retry topic successfully",
+                    "eventId", id.toString()
+            ));
+        } catch (RuntimeException e) {
+            log.error("Error retrying event", e);
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "error",
+                    "message", e.getMessage()
+            ));
+        }
+    }
+
+    /**
+     * GET /health - Health check endpoint
+     */
     @GetMapping("/health")
-    public ResponseEntity<?> health() {
-        // Return JSON with status
+    public ResponseEntity<Map<String, String>> health() {
         return ResponseEntity.ok(Map.of(
                 "status", "UP",
-                "message", "Dashboard is running",
-                "timestamp", System.currentTimeMillis()
+                "message", "SAP Dashboard Application is running",
+                "timestamp", LocalDateTime.now().toString()
         ));
+    }
+
+    /**
+     * GET /api/events/count/byStatus - Get event count by status
+     */
+    @GetMapping("/api/events/count/byStatus")
+    public ResponseEntity<Map<String, Long>> getEventCountByStatus() {
+        Map<String, Long> counts = eventService.getEventCountByStatus();
+        return ResponseEntity.ok(counts);
     }
 }
