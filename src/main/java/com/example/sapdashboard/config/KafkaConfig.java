@@ -29,6 +29,13 @@ public class KafkaConfig {
 
     @Value("${KAFKA_TRUSTSTORE_PASSWORD}")
     private String kafkaTruststorePassword;
+    @Value("${KAFKA_USERNAME}")
+    private String kafkaUsername;
+
+    @Value("${KAFKA_PASSWORD}")
+    private String kafkaPassword;
+
+
 
 
     // ===== TOPICS =====
@@ -57,27 +64,32 @@ public class KafkaConfig {
     public ProducerFactory<String, Object> producerFactory() {
         Map<String, Object> configProps = new HashMap<>();
 
-        // Basic connection + serialization
         configProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         configProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         configProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
 
-        // Reliability settings
         configProps.put(ProducerConfig.ACKS_CONFIG, "all");
         configProps.put(ProducerConfig.RETRIES_CONFIG, 3);
         configProps.put(ProducerConfig.LINGER_MS_CONFIG, 10);
 
-        // ***** Aiven security: SASL over TLS *****
+        // Aiven security: SASL over TLS
         configProps.put("security.protocol", "SASL_SSL");
         configProps.put("sasl.mechanism", "SCRAM-SHA-256");
-        configProps.put("sasl.jaas.config", kafkaSaslJaasConfig);
 
-        // (Optional) If you are using a truststore, you can also add:
-         configProps.put("ssl.truststore.location", "/app/kafka-truststore.jks");
-         configProps.put("ssl.truststore.password", kafkaTruststorePassword);
+        String jaas = String.format(
+                "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"%s\" password=\"%s\";",
+                kafkaUsername,
+                kafkaPassword
+        );
+        configProps.put("sasl.jaas.config", jaas);
+
+        // Truststore
+        configProps.put("ssl.truststore.location", "/app/kafka-truststore.jks");
+        configProps.put("ssl.truststore.password", kafkaTruststorePassword);
 
         return new DefaultKafkaProducerFactory<>(configProps);
     }
+
 
     // ===== KAFKA TEMPLATE =====
 
