@@ -27,6 +27,10 @@ public class KafkaConfig {
     @Value("${KAFKA_SASL_JAAS_CONFIG}")
     private String kafkaSaslJaasConfig;
 
+    @Value("${KAFKA_TRUSTSTORE_PASSWORD}")
+    private String kafkaTruststorePassword;
+
+
     // ===== TOPICS =====
 
     @Bean
@@ -69,8 +73,8 @@ public class KafkaConfig {
         configProps.put("sasl.jaas.config", kafkaSaslJaasConfig);
 
         // (Optional) If you are using a truststore, you can also add:
-        // configProps.put("ssl.truststore.location", "/app/kafka-truststore.jks");
-        // configProps.put("ssl.truststore.password", "<your-password-or-env-var>");
+         configProps.put("ssl.truststore.location", "/app/kafka-truststore.jks");
+         configProps.put("ssl.truststore.password", kafkaTruststorePassword);
 
         return new DefaultKafkaProducerFactory<>(configProps);
     }
